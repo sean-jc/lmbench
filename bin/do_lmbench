@@ -1,0 +1,203 @@
+#!/bin/bash
+
+# lmbench - run the lmbench benchmark suite.
+#
+# Hacked by Larry McVoy (lm@sun.com, lm@sgi.com, lm@bitmover.com).
+# Copyright (c) 1994 Larry McVoy.  GPLed software.
+# $Id$
+
+OUTPUT=/dev/tty
+ENOUGH=5000
+FILE=/home/sean/tmp/XXX
+TMPDIR=/home/sean/tmp
+LINE_SIZE=64
+MB=4096
+LMBENCH_SCHED="DEFAULT"
+LOOP_O=0.00000000
+TIMING_O=0
+VERSION=lmbench-3alpha4
+
+NUM_CPUS="1"
+
+# Figure out how big we can go for stuff that wants to use
+# all and half of memory.
+HALF="512 1k 2k 4k 8k 16k 32k 64k 128k 256k 512k 1m"
+ALL="$HALF 2m"
+i=4
+while [[ $i -le $MB ]]; do
+	ALL="$ALL ${i}m"
+	h=`expr $i / 2`
+	HALF="$HALF ${h}m"
+	i=`expr $i \* 2`
+done
+
+# Figure out as much stuff as we can about this system.
+# Sure would be nice if everyone had SGI's "hinv".
+printf "Version:\t       ${VERSION}\n" 1>&2
+printf "Kernel:\t\t       $(uname -spr)\n" 1>&2
+printf "Date:\t\t       $(date)\n" 1>&2
+printf "Uptime:\t\t      $(uptime)\n" 1>&2
+lscpu | grep -v Architecture | grep -v "Byte Order" | grep -v op-mode | grep -v BogoMIPS | grep -v Virtualization | grep -v Flags | grep -v On-line 1>&2
+printf "Line Size:\t       ${LINE_SIZE}\n" 1>&2
+printf "Scheduler:\t       $LMBENCH_SCHED\n" 1>&2
+
+STAT=$TMPDIR/lmbench
+mkdir $TMPDIR 2>/dev/null
+touch $STAT 2>/dev/null
+if [ ! -f $STAT ]; then
+	echo "Can't make a file - $STAT - in $TMPDIR" >> ${OUTPUT}
+	exit 1
+fi
+
+
+# $1 - group header
+begin_group() {
+	printf "$1 - $(date)\n" >> ${OUTPUT}
+	printf "\n\n$1 - $(date)\n" 1>&2
+	msleep 250
+}
+
+# $1 - command to run
+do_benchmark() {
+	printf "$1:\t" 1>&2
+	$1
+}
+
+begin_group "Latency Measurements"
+do_benchmark "lat_syscall -P $NUM_CPUS null"
+do_benchmark "lat_syscall -P $NUM_CPUS read"
+do_benchmark "lat_syscall -P $NUM_CPUS write"
+do_benchmark "lat_syscall -P $NUM_CPUS stat $STAT"
+do_benchmark "lat_syscall -P $NUM_CPUS fstat $STAT"
+do_benchmark "lat_syscall -P $NUM_CPUS open $STAT"
+
+for i in 10 100 250 500; do
+	do_benchmark "lat_select -n $i -P $NUM_CPUS file"
+done
+for i in 10 100 250 500; do
+	do_benchmark "lat_select -n $i -P $NUM_CPUS tcp"
+done
+
+do_benchmark "lat_sig -P $NUM_CPUS install"
+do_benchmark "lat_sig -P $NUM_CPUS catch"
+do_benchmark "lat_sig -P $NUM_CPUS prot $DIR/lat_sig"
+
+do_benchmark "lat_pipe -P $NUM_CPUS"
+do_benchmark "lat_unix -P $NUM_CPUS"
+
+DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
+cp $DIR/hello /tmp/hello
+for i in fork exec shell; do
+	do_benchmark "lat_proc -P $NUM_CPUS $i"
+done
+rm -f /tmp/hello
+
+if [[ ! -f $FILE ]]; then
+	printf "Randomizing file: $FILE - $(date)\n" >> ${OUTPUT}
+	dd if=/dev/urandom of=$FILE bs=1M count=$MB 2>/dev/null
+fi
+
+# do_benchmark "lat_pagefault -P $NUM_CPUS $FILE"
+for i in $ALL; do
+	do_benchmark "lat_mmap -P $NUM_CPUS $i $FILE"
+done
+
+begin_group "Local Network Latency"
+lat_udp -s
+do_benchmark "lat_udp -P $NUM_CPUS localhost"
+lat_udp -S localhost
+msleep 250
+
+lat_tcp -s
+do_benchmark "lat_tcp -P $NUM_CPUS localhost"
+lat_tcp -S localhost
+msleep 250
+
+# lat_rpc -s
+# do_benchmark "lat_rpc -P $NUM_CPUS -p udp localhost"
+# do_benchmark "lat_rpc -P $NUM_CPUS -p tcp localhost"
+# lat_rpc -S localhost
+# msparaleep 250
+
+lat_connect -s
+do_benchmark "lat_connect localhost"
+lat_connect -S localhost
+msleep 250
+
+
+begin_group "Context Switch Overhead"
+CTX="0 4 8 16 32 64"
+N="2 4 8 16 24 32 64 96"
+
+for size in $CTX; do
+	for proc in $N; do
+		do_benchmark "lat_ctx -P $NUM_CPUS -s $size $proc"
+	done
+done
+
+bw_tcp -s
+for m in 1 64 128 256 512 1024 1437 10M; do
+	do_benchmark "bw_tcp -P $NUM_CPUS -m $m localhost"
+done
+bw_tcp -S localhost
+msleep 250
+
+# begin_group "Bandwidth Measurements"
+# do_benchmark "bw_unix -P $NUM_CPUS"
+# do_benchmark "bw_pipe -P $NUM_CPUS"
+# for i in $ALL; do
+# 	do_benchmark "bw_file_rd -P $NUM_CPUS $i io_only $FILE"
+# done
+# for i in $ALL; do
+# 	do_benchmark "bw_file_rd -P $NUM_CPUS $i open2close $FILE"
+# done
+# for i in $ALL; do
+# 	do_benchmark "bw_mmap_rd -P $NUM_CPUS $i mmap_only $FILE"
+# done
+# for i in $ALL; do
+# 	do_benchmark "bw_mmap_rd -P $NUM_CPUS $i open2close $FILE"
+# done
+# for i in $HALF; do
+# 	do_benchmark "bw_mem -P $NUM_CPUS $i bcopy"
+# done
+# for i in $HALF; do
+# 	do_benchmark "bw_mem -P $NUM_CPUS $i bcopy conflict"
+# done
+# for i in $ALL; do
+# 	do_benchmark "bw_mem -P $NUM_CPUS $i bzero"
+# done
+# for i in $HALF; do
+# 	do_benchmark "bw_mem -P $NUM_CPUS $i fcp"
+# done
+# for i in $HALF; do
+# 	do_benchmark "bw_mem -P $NUM_CPUS $i cp"
+# done
+# for i in $ALL; do
+# 	do_benchmark "bw_mem -P $NUM_CPUS $i frd"
+# done
+# for i in $ALL; do
+# 	do_benchmark "bw_mem -P $NUM_CPUS $i rd"
+# done
+# for i in $ALL; do
+# 	do_benchmark "bw_mem -P $NUM_CPUS $i fwr"
+# done
+# for i in $ALL; do
+# 	do_benchmark "bw_mem -P $NUM_CPUS $i wr"
+# done
+# for i in $ALL; do
+# 	do_benchmark "bw_mem -P $NUM_CPUS $i rdwr"
+# done
+
+# begin_group "Memory Load Parallelism"
+# for i in $ALL; do
+# 	do_benchmark "par_mem -L $LINE_SIZE -M $i"
+# done
+
+# begin_group "STREAM Benchmark"
+# do_benchmark "stream -P $NUM_CPUS -M ${MB}M"
+# do_benchmark "stream -P $NUM_CPUS -v 2 -M ${MB}M"
+
+echo \[`date`] 1>&2
+printf "DONE - $(date)\n" >> ${OUTPUT}
+
+exit 0
