@@ -8,8 +8,8 @@
 
 OUTPUT=/dev/tty
 ENOUGH=5000
-FILE=/home/sean/tmp/XXX
-TMPDIR=/home/sean/tmp
+FILE=~/tmp/XXX
+TMPDIR=~/tmp
 LINE_SIZE=64
 MB=4096
 LMBENCH_SCHED="DEFAULT"
