@@ -1,5 +1,5 @@
 #!/bin/bash
-if [[ $# -ne 1 ]]; then
+if [[ $# -lt 1 ]]; then
 	printf "Must specify the results base name\n"
 	exit 1
 fi
@@ -8,17 +8,19 @@ if [ ! -d $TMPDIR ]; then
 	mkdir -p $TMPDIR
 fi
 
-RESDIR=~/.perf/lmbench/
-if [ ! -d $RESDIR ]; then
-	mkdir -p $RESDIR
-fi
+if [[ $1 != "@" ]]; then
+	RESDIR=~/.perf/lmbench/
+	if [ ! -d $RESDIR ]; then
+		mkdir -p $RESDIR
+	fi
 
-RESNUM=0
-RESULTS=$RESDIR/$1-$RESNUM.log
-while [[ -f $RESULTS ]]; do
-	RESNUM=`expr $RESNUM + 1`
+	RESNUM=0
 	RESULTS=$RESDIR/$1-$RESNUM.log
-done
+	while [[ -f $RESULTS ]]; do
+		RESNUM=`expr $RESNUM + 1`
+		RESULTS=$RESDIR/$1-$RESNUM.log
+	done
+fi
 
 DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
 PATH=$DIR:${PATH}
@@ -28,4 +30,14 @@ export PATH OUTPUT
 # Variables used by the microbenchmarks themselves.
 export ENOUGH TIMING_O LOOP_O LINE_SIZE LMBENCH_SCHED
 
-do_lmbench 2>${RESULTS}
+TARGET_BENCHMARK=""
+if [[ $# -eq 2 ]]; then
+	TARGET_BENCHMARK=$2
+fi
+export TARGET_BENCHMARK
+
+if [[ $1 != "@" ]]; then
+	do_lmbench 2>${RESULTS}
+else
+	do_lmbench
+fi

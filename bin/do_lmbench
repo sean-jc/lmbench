@@ -21,7 +21,7 @@ NUM_CPUS="1"
 
 # Figure out how big we can go for stuff that wants to use
 # all and half of memory.
-HALF="512 1k 2k 4k 8k 16k 32k 64k 128k 256k 512k 1m"
+HALF="512k 1m"
 ALL="$HALF 2m"
 i=4
 while [[ $i -le $MB ]]; do
@@ -52,8 +52,10 @@ fi
 
 # $1 - group header
 begin_group() {
-	printf "$1 - $(date)\n" >> ${OUTPUT}
-	printf "\n\n$1 - $(date)\n" 1>&2
+	if [[ -z $TARGET_BENCHMARK ]]; then
+		printf "$1 - $(date)\n" >> ${OUTPUT}
+		printf "\n\n$1 - $(date)\n" 1>&2
+	fi
 	msleep 250
 }
 
@@ -64,83 +66,98 @@ do_benchmark() {
 }
 
 begin_group "Latency Measurements"
-do_benchmark "lat_syscall -P $NUM_CPUS null"
-do_benchmark "lat_syscall -P $NUM_CPUS read"
-do_benchmark "lat_syscall -P $NUM_CPUS write"
-do_benchmark "lat_syscall -P $NUM_CPUS stat $STAT"
-do_benchmark "lat_syscall -P $NUM_CPUS fstat $STAT"
-do_benchmark "lat_syscall -P $NUM_CPUS open $STAT"
 
-for i in 10 100 250 500; do
-	do_benchmark "lat_select -n $i -P $NUM_CPUS file"
-done
-for i in 10 100 250 500; do
-	do_benchmark "lat_select -n $i -P $NUM_CPUS tcp"
-done
-
-do_benchmark "lat_sig -P $NUM_CPUS install"
-do_benchmark "lat_sig -P $NUM_CPUS catch"
-do_benchmark "lat_sig -P $NUM_CPUS prot $DIR/lat_sig"
-
-do_benchmark "lat_pipe -P $NUM_CPUS"
-do_benchmark "lat_unix -P $NUM_CPUS"
-
-DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
-cp $DIR/hello /tmp/hello
-for i in fork exec shell; do
-	do_benchmark "lat_proc -P $NUM_CPUS $i"
-done
-rm -f /tmp/hello
-
-if [[ ! -f $FILE ]]; then
-	printf "Randomizing file: $FILE - $(date)\n" >> ${OUTPUT}
-	dd if=/dev/urandom of=$FILE bs=1M count=$MB 2>/dev/null
+if [[ -z $TARGET_BENCHMARK || $TARGET_BENCHMARK == "syscall" ]]; then
+	do_benchmark "lat_syscall -P $NUM_CPUS null"
+	do_benchmark "lat_syscall -P $NUM_CPUS read"
+	do_benchmark "lat_syscall -P $NUM_CPUS write"
+	do_benchmark "lat_syscall -P $NUM_CPUS stat $STAT"
+	do_benchmark "lat_syscall -P $NUM_CPUS fstat $STAT"
+	do_benchmark "lat_syscall -P $NUM_CPUS open $STAT"
 fi
 
-# do_benchmark "lat_pagefault -P $NUM_CPUS $FILE"
-for i in $ALL; do
-	do_benchmark "lat_mmap -P $NUM_CPUS $i $FILE"
-done
-
-begin_group "Local Network Latency"
-lat_udp -s
-do_benchmark "lat_udp -P $NUM_CPUS localhost"
-lat_udp -S localhost
-msleep 250
-
-lat_tcp -s
-do_benchmark "lat_tcp -P $NUM_CPUS localhost"
-lat_tcp -S localhost
-msleep 250
-
-# lat_rpc -s
-# do_benchmark "lat_rpc -P $NUM_CPUS -p udp localhost"
-# do_benchmark "lat_rpc -P $NUM_CPUS -p tcp localhost"
-# lat_rpc -S localhost
-# msparaleep 250
-
-lat_connect -s
-do_benchmark "lat_connect localhost"
-lat_connect -S localhost
-msleep 250
-
-
-begin_group "Context Switch Overhead"
-CTX="0 4 8 16 32 64"
-N="2 4 8 16 24 32 64 96"
-
-for size in $CTX; do
-	for proc in $N; do
-		do_benchmark "lat_ctx -P $NUM_CPUS -s $size $proc"
+if [[ -z $TARGET_BENCHMARK || $TARGET_BENCHMARK == "select" ]]; then
+	for i in 10 100 250 500; do
+		do_benchmark "lat_select -n $i -P $NUM_CPUS file"
 	done
-done
+	for i in 10 100 250 500; do
+		do_benchmark "lat_select -n $i -P $NUM_CPUS tcp"
+	done
+fi
 
-bw_tcp -s
-for m in 1 64 128 256 512 1024 1437 10M; do
-	do_benchmark "bw_tcp -P $NUM_CPUS -m $m localhost"
-done
-bw_tcp -S localhost
-msleep 250
+if [[ -z $TARGET_BENCHMARK || $TARGET_BENCHMARK == "sig" ]]; then
+	do_benchmark "lat_sig -P $NUM_CPUS install"
+	do_benchmark "lat_sig -P $NUM_CPUS catch"
+	do_benchmark "lat_sig -P $NUM_CPUS prot $DIR/lat_sig"
+fi
+
+if [[ -z $TARGET_BENCHMARK || $TARGET_BENCHMARK == "misc" ]]; then
+	do_benchmark "lat_pipe -P $NUM_CPUS"
+	do_benchmark "lat_unix -P $NUM_CPUS"
+
+	DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
+	cp $DIR/hello /tmp/hello
+	for i in fork exec shell; do
+		do_benchmark "lat_proc -P $NUM_CPUS $i"
+	done
+	rm -f /tmp/hello
+fi
+
+
+if [[ -z $TARGET_BENCHMARK || $TARGET_BENCHMARK == "mmap" ]]; then
+	if [[ ! -f $FILE ]]; then
+		printf "Randomizing file: $FILE - $(date)\n" >> ${OUTPUT}
+		dd if=/dev/urandom of=$FILE bs=1M count=$MB 2>/dev/null
+	fi
+
+	# do_benchmark "lat_pagefault -P $NUM_CPUS $FILE"
+	for i in $ALL; do
+		do_benchmark "lat_mmap -P $NUM_CPUS $i $FILE"
+	done
+fi
+
+begin_group "Local Network Latency and Throughput"
+if [[ -z $TARGET_BENCHMARK || $TARGET_BENCHMARK == "udp" ]]; then
+	lat_udp -s
+	do_benchmark "lat_udp -P $NUM_CPUS localhost"
+	lat_udp -S localhost
+	msleep 250
+fi
+
+if [[ -z $TARGET_BENCHMARK || $TARGET_BENCHMARK == "tcp" ]]; then
+	lat_tcp -s
+	do_benchmark "lat_tcp -P $NUM_CPUS localhost"
+	lat_tcp -S localhost
+	msleep 250
+fi
+
+if [[ -z $TARGET_BENCHMARK || $TARGET_BENCHMARK == "connect" ]]; then
+	lat_connect -s
+	do_benchmark "lat_connect localhost"
+	lat_connect -S localhost
+	msleep 250
+fi
+
+if [[ -z $TARGET_BENCHMARK || $TARGET_BENCHMARK == "bw_tcp" ]]; then
+	bw_tcp -s
+	for m in 1 64 128 256 512 1024 1437 10M; do
+		do_benchmark "bw_tcp -P $NUM_CPUS -m $m localhost"
+	done
+	bw_tcp -S localhost
+	msleep 250
+fi
+
+if [[ -z $TARGET_BENCHMARK || $TARGET_BENCHMARK == "ctx" ]]; then
+	begin_group "Context Switch Overhead"
+	CTX="0 4 8 16 32 64"
+	N="2 4 8 16 24 32 64 96"
+
+	for size in $CTX; do
+		for proc in $N; do
+			do_benchmark "lat_ctx -P $NUM_CPUS -s $size $proc"
+		done
+	done
+fi
 
 # begin_group "Bandwidth Measurements"
 # do_benchmark "bw_unix -P $NUM_CPUS"
